@@ -1,0 +1,161 @@
+@font-face {
+    font-family: "YanShiYouRanXiaoKai"; /*演示悠然小楷*/
+    src: url("./res/YanShiYouRanXiaoKai-2.ttf");
+}
+
+body {
+    margin: 0;
+}
+
+h1, h2, h3, h4 {
+    padding: 0;
+    color: #009688;
+    margin: 0;
+    padding-top: 0.5em;
+}
+
+h2 {
+    padding-top: 0.1em;
+}
+
+h4 {
+    color: #8f59fffc;
+}
+
+#main {
+    text-align: center;
+    position: absolute;
+    left: 0;
+    right: 0;
+    width: 95%;
+    margin: auto;
+    opacity: 1;
+    transition: opacity 2s 0s;
+}
+
+.category {
+    min-width: 14%;
+    display: inline-block;
+    vertical-align: text-top;
+    text-align: center;
+}
+
+.category h2, .category div {
+    text-align: left;
+}
+
+li {
+    list-style-type: none;
+}
+
+#cart {
+    margin-block-start: 0;
+    padding-inline-start: 10px;
+    margin-block-end: 0;
+}
+
+.item {
+    cursor: pointer;
+    margin-left: 1em;
+}
+
+.long {
+    float: left;
+    min-width: 48%;
+}
+
+div#yjsl {
+    font-size: 300px;
+    font-family: ui-sans-serif;
+    text-align: center;
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    height: 100%;
+    margin: auto;
+    width: 80%;
+    vertical-align: middle;
+}
+
+#yjsl span {
+    color: #e0e0e0;
+    margin: auto;
+    display: block;
+    position: absolute;
+    transform: translate(0%, -50%);
+    width: 25%;
+    top: 50%;
+    z-index: -1;
+}
+
+#canvas {
+    position: absolute;
+    opacity: 0;
+    transition: opacity 3s 2s;
+    z-index: -1;
+}
+
+#cartWrapper {
+    position: fixed;
+    bottom: 10px;
+    background-color: white;
+    border: 1px solid rgb(240, 44, 44);
+    border-radius: 1em;
+    padding: 1em;
+    display: none;
+    left: 10px;
+    transition: opacity 2s 0s;
+}
+
+#editor {
+    font-family: Consolas, Monaco, monospace;
+    position: relative;
+    z-index: 1;
+    background: white;
+    width: 95%;
+    height: 100%;
+    overflow: auto;
+    margin: auto;
+    outline: 1px solid gray;
+    border-radius: 5px;
+    top:5px;
+    padding: 5px 0;
+}
+
+#editorBtn {
+    transition: opacity 2s 0s;
+}
+
+.TokenChineseNum, .TokenComma, .FirstClass {
+    color: #FF9800;
+    font-weight: bold;
+    font-size: 1.2em;
+    text-decoration: underline;
+    text-underline-offset: 0.3em;
+}
+
+.TokenDigit, .TokenDot, .TokenColon, .SecondClass {
+    color: #03A9F4;
+}
+
+.TokenLeftBracket, .TokenRightBracket {
+    color: #F44336;
+}
+
+.seen {
+    color: #009688;
+    text-decoration: underline;
+    text-decoration-color: red;
+    text-underline-offset: 0.2em;
+    background: #FFEB3B;
+}
+
+.FirstClass .TokenName{
+    color: lightcoral;
+}
+
+.FirstClass .TokenName{
+    color: lightcoral;
+}

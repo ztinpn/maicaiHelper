@@ -1,0 +1,799 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <title>选菜小助手v0.1</title>
+    <script src="./js/util.js"></script>
+    <script src="./js/foodParser.js"></script>
+    <script src="./js/bits.js"></script>
+    <script src="./js/stateMachine.js"></script>
+    <script src="./js/lrcHelper.js"></script>
+    <script src="./js/animationController.js"></script>
+</head>
+<link href="style.css" rel="stylesheet" type="text/css"/>
+<body>
+<div id="editor" contenteditable="true" spellcheck="false" style="display: none;">
+
+</div>
+<button id="editorBtn" type="button" style="color: #fff;
+    background-color: #5bc0de;
+    border-color: #46b8da;position: fixed;
+    border: 0;
+    padding: 3px 5px;z-index: 100;left: 0;
+    top: 0;">编辑
+</button>
+
+<!-- 主界面 -->
+<div id="main">
+    <!-- js来填充分组 -->
+</div>
+
+<!-- 购物车 -->
+<div id="cartWrapper">
+    <!-- 选中的项目 -->
+    <ul id="cart"></ul>
+    <hr>
+    <!-- 待购买的清单 -->
+    <span id="toBuy"></span>
+</div>
+
+<!--彩蛋部分-->
+
+<!-- 音频嵌入 -->
+<audio id="bgMusic">
+    <source src="./res/yycy.mp3" type="audio/mp3">
+</audio>
+
+<!-- 歌词和动画展示 -->
+<canvas id="canvas"></canvas>
+
+<!-- 键盘输入展示 -->
+<div id="yjsl"></div>
+</body>
+<script>
+    // 选菜功能
+
+    // 输入部分，定义了接近日常语言表达的DSL，方便查看和编辑，小白也能上手修改。
+    var foodInfoContent = `
+        一、食物分类
+        1. 主食类: 大米
+        2. 粗粮: 地瓜 玉米 紫薯
+        3. 调料: 酱油 料酒 香菜 葱 洋葱 青椒 尖椒 姜 蒜
+        4. 蔬菜类: 豆芽 青豆 豌豆 红薯叶 菜心 包菜 茄子 土豆 甜豆 黄瓜 丝瓜 西葫芦 西红柿
+               芥菜 生菜 菠菜苗 油麦菜 茼蒿 空心菜 花菜 快菜 青椒 芋头 山药 西兰花 香菇
+               袖珍菇 金针菇 南瓜 苦瓜 冬瓜 胡萝卜 四季豆 豆腐
+        5. 肉类: 鸡肉 排骨 猪蹄 里脊 牛肉 牛腱
+        6. 水产: 干贝 虾米 海白虾 花蛤 鱼丸 带鱼 小黄鱼 嘎鱼 龙利鱼 黄花鱼 罗非鱼
+        7. 蛋类: 鸡蛋 鹌鹑蛋
+        8. 水果: 芒果 蓝莓 杨梅 丑橘 梨 西瓜 菠萝 火龙果 葡萄 提子 桃子 樱桃 哈密瓜 脐橙
+
+        二、组合菜品-汤类
+        1. 鸡蛋: [西红柿 汤]
+        2. 猪肉排骨: [海带 汤] [墨鱼 汤] [白萝卜 汤]
+        3. 猪蹄: [墨鱼 汤]
+        4. 羊肉: [葱 胡萝卜 汤]
+        5. 豆腐: [花蛤 汤] [葱 嘎鱼 汤] [牛肉 淀粉 干贝 汤]
+        6. 里脊: [汤]
+        7. 虾饺: [西红柿 汤]
+        8. 鱼丸: [香菜 汤] [紫菜 汤]
+
+        三、组合菜品-非汤类
+        1. 土豆: [葱] [鸡肉 咖喱 胡萝卜 山药]
+        2. 鸡蛋: [葱 豆芽] [葱] [胡萝卜] [西红柿] [洋葱] [尖椒] [丝瓜]
+        3. 海白虾: [葱] [葱 白菜]
+        4. 五花肉: [甜豆] [胡萝卜] [香菇] [袖珍菇] [尖椒]
+        5. 豆腐: [葱 煎]
+        6. 冬瓜: [干贝]
+        7. 带鱼: [葱 煎]
+        8. 鱿鱼: [尖椒]
+        9. 里脊: [炒] [黄瓜 豆芽 金针菇 洋葱 火锅底料]
+        10. 龙利鱼: [葱]
+
+        四、分组展示
+        1. 考虑补充: 主食类 调料
+        2. 另外买: 水果 粗粮
+        3. 单独做: 蔬菜类 水产 蛋类 肉类
+        4. 搭配做-汤类: 组合菜品-汤类
+        5. 搭配做-非汤类: 组合菜品-非汤类
+`.substring(1); // 去掉前面的\n，更美观
+
+    foodInfoContent = getFoodInfoRawOrDefault(foodInfoContent);
+    var editorEle = document.getElementById("editor");
+    var editorHistoryHelper = (function () {
+        var editorInnerHTMLHistory = []; // 历史记录数组
+        var curIdx = -1; // 表示当前位置
+        var size = 0; // editorInnerHTMLHistory[0..size-1]表示有效区间。curIdx..size-1 是可以redo的区间
+        // 首次执行需要add一下，作为初始，那么有curIdx = 0, size=1，editorInnerHTMLHistory.length=1
+        return {
+            add: function (linearPos) {
+                var innerHTML = editorEle.innerHTML;
+                var innerText = editorEle.innerText; // 方便看，用来debug
+
+                // 有变化时才加入
+                if (curIdx >= 0 && editorInnerHTMLHistory[curIdx].html === innerHTML) {
+                    return;
+                }
+
+                curIdx++;
+                size = curIdx + 1; // add之后，size设置为边界
+                if (size > editorInnerHTMLHistory.length) {
+                    // 需要扩容
+                    editorInnerHTMLHistory.push(null);
+                } else {
+                    // noop
+                }
+                // 不能只记住innerHTML因为语法错误的情况下也需要可以撤销
+                editorInnerHTMLHistory[curIdx] = {
+                    html: innerHTML,
+                    text: innerText,
+                    linearPos: linearPos,
+                };
+            },
+            rollback: function () {
+                if (curIdx > 0) {
+                    curIdx--;
+                    // size不需要变更，因为要支持redo
+                    var editorInnerHTMLHistoryItem = editorInnerHTMLHistory[curIdx]; // 然后才是上一个版本
+                    editorEle.innerHTML = editorInnerHTMLHistoryItem.html;
+                    setLinearPos(editorInnerHTMLHistoryItem.linearPos);
+                } else {
+                    // noop
+                }
+            },
+            redo: function () {
+                if (curIdx < size - 1) {
+                    // 还有空间可以redo
+                    curIdx++;
+                    var editorInnerHTMLHistoryItem = editorInnerHTMLHistory[curIdx]; // 然后才是上一个版本
+                    editorEle.innerHTML = editorInnerHTMLHistoryItem.html;
+                    setLinearPos(editorInnerHTMLHistoryItem.linearPos);
+                } else {
+                    // noop
+                }
+            },
+            changeLinearPos: function () {
+                // 移动光标之后需要更新下位置，方便rollback之后回到这里
+                if (curIdx >= 0) {
+                    if (getPreSpaceCntAndLinearPos().linearPos != null) {
+                        editorInnerHTMLHistory[curIdx].linearPos = getPreSpaceCntAndLinearPos().linearPos;
+                    }
+                }
+            },
+        }
+    })();
+
+    function renderEditorEle(foodInfoContent, linearPos) {
+        var tokens = getTokens(foodInfoContent);
+        new AST(tokens);
+        var eles = tokens2HTMLEles(tokens.slice(0, tokens.length));
+        editorEle.innerHTML = "";
+        eles.forEach(ele => editorEle.appendChild(ele));
+        editorHistoryHelper.add(linearPos);
+        setLinearPos(linearPos);
+    }
+
+    renderEditorEle(foodInfoContent, 0);
+
+    // 主界面元素
+    var mainEle = document.getElementById("main");
+
+    var canvasEle = document.getElementById("canvas");
+
+    function getPreSpaceCntAndLinearPos() {
+        var selection = getSelection();
+        console.log(selection.focusOffset);
+        var focusNode = selection.focusNode;
+        console.log("focusNode:");
+        console.log(focusNode);
+        if (focusNode == null) {
+            return {
+                preSpaceCnt: 0,
+                firstEleAfterSpace: null,
+                linearPos: 0,
+            };
+        }
+        switch (focusNode.nodeName) {
+            case "DIV":
+                focusNode = focusNode.children[1].children[0];
+                break;
+            case "SPAN":
+                break;
+            default:
+                focusNode = focusNode.parentNode;
+                break;
+        }
+        var nodes = editorEle.querySelectorAll("span");
+        var linearPos = 0;
+        var focusNodeIdx = -1;
+        for (var i = 0; i < nodes.length; i++) {
+            var node = nodes[i];
+            if (node === focusNode) {
+                linearPos += selection.focusOffset;
+                focusNodeIdx = i - 1; // -1是因为当前是回车
+                break;
+            }
+            linearPos += node.innerText.length;
+        }
+        var continuousWhiteSpaceCnt = 0;
+        var firstEleAfterSpace = null; // 空格之后的第一个元素
+        for (var i = focusNodeIdx; i >= 0; i--) {
+            if (nodes[i].innerHTML === "<br>") {
+                break;
+            }
+            if (nodes[i].innerText === " ") {
+                continuousWhiteSpaceCnt++;
+            } else {
+                firstEleAfterSpace = nodes[i];
+                continuousWhiteSpaceCnt = 0;
+            }
+        }
+        return {
+            preSpaceCnt: continuousWhiteSpaceCnt,
+            firstEleAfterSpace: firstEleAfterSpace,
+            linearPos: linearPos,
+        };
+    }
+
+    function setLinearPos(offset) {
+        var residualOffset = offset;
+        var selection = getSelection();
+        var nodes = editorEle.querySelectorAll("span");
+        for (var i = 0; i < nodes.length; i++) {
+            var node = nodes[i];
+            if (node.innerText.length === residualOffset) {
+                var pos = node.childNodes[0].nodeName === "BR" ? 0 : node.innerText.length;
+                selection.setPosition(node.childNodes[0], pos);
+                break
+            } else if (node.innerText.length > residualOffset) {
+                var pos = node.childNodes[0].nodeName === "BR" ? 0 : residualOffset;
+                selection.setPosition(node.childNodes[0], pos);
+                break
+            }
+            residualOffset -= node.innerText.length;
+        }
+    }
+
+    function processEditorInput(event) {
+        var content = editorEle.innerText.replace(/ /g, " ");
+        var preSpaceCntAndLinearPos = getPreSpaceCntAndLinearPos();
+        var preSpaceCnt = preSpaceCntAndLinearPos.preSpaceCnt;
+        var firstEleAfterSpace = preSpaceCntAndLinearPos.firstEleAfterSpace;
+        var pos = preSpaceCntAndLinearPos.linearPos;
+        if (event.inputType === "historyUndo") {
+            editorHistoryHelper.rollback();
+            return;
+        } else if (event.inputType === "historyRedo") {
+            editorHistoryHelper.redo();
+            return;
+        } else if (event.inputType === "insertParagraph") {
+            // 在pos位置插入preSpaceCnt个空格并修改pos
+            var part1 = content.substring(0, pos + 1); // pos是回车
+            var part2 = content.substring(pos + 1, content.length);
+            var spaces = repeatChar(preSpaceCnt, " ");
+            var extraPart = "";
+            if (firstEleAfterSpace.classList.contains("TokenDigit")) {
+                // 需要加上自动编号
+                var num = parseInt(firstEleAfterSpace.innerText) + 1;
+                extraPart = num + ". ";
+            }
+            content = part1 + spaces + extraPart + part2;
+            pos += preSpaceCnt + extraPart.length + 1;
+        } else if (event.data === "[") {
+            // 自动插入]
+            var part1 = content.substring(0, pos);
+            var part2 = content.substring(pos, content.length);
+            content = part1 + "]" + part2;
+        } else {
+            // 不用干啥
+        }
+        try {
+            renderEditorEle(content, pos);
+            setFoodInfoRaw(content);
+        } catch (e) {
+            editorHistoryHelper.add(pos);
+            // setFoodInfoRaw(content);
+            return;
+        }
+    }
+
+    var enableInput = true;
+
+    editorEle.addEventListener("compositionstart", function () {
+        enableInput = false;
+    });
+    editorEle.addEventListener("compositionend", function (event) {
+        enableInput = true;
+        console.log("compositionend!")
+        processEditorInput(event);
+    });
+    editorEle.addEventListener("click", function (event) {
+        editorHistoryHelper.changeLinearPos();
+    })
+    editorEle.addEventListener("input", function (event) {
+        if (!enableInput) {
+            return;
+        }
+        if (event.ctrlKey || event.metaKey) {
+            return;
+        }
+        processEditorInput(event);
+    });
+
+    var editorBtnEle = document.getElementById("editorBtn");
+    editorBtnEle.onclick = function () {
+        editorBtnEle.innerText = editorBtnEle.innerText === "编辑" ? "保存" : "编辑";
+        // yjsl在彩蛋模式下要关闭
+        toggleByDisplay([editorEle, mainEle, canvasEle]);
+        render(getFoodInfoRawOrDefault(foodInfoContent));
+    }
+    var mainEleOnClickerEventListeners = [];
+
+    render(getFoodInfoRawOrDefault(foodInfoContent));
+
+    function render(foodInfoContent) {
+        mainEle.innerHTML = "";
+        mainEleOnClickerEventListeners.forEach(listener => mainEle.removeEventListener("click", listener));
+        var foodInfo = parseFoodInfo(foodInfoContent);
+        var foodGroups = foodInfo.groups; // 一二级分类的分组信息
+        var condimentNames = foodInfo.condimentNames; // 调料名称列表，用于后面的染色判断
+
+        // 渲染食材节点，即括号里的部分："5. 搭配做-非汤类:" -> "五花肉:" -> ("2. 胡萝卜")
+
+        /*
+        renderSecondClassList:
+            <div class="normal">
+                <h4>海白虾:</h4>
+                    <span class="item" secondClassName="海白虾" json="[&quot;葱&quot;]" uid="102" style="color: black;">
+                                <input type="checkbox">1. 葱
+                    </span><br>
+                    <span class="item" secondClassName="海白虾" json="[&quot;葱&quot;,&quot;白菜&quot;]" uid="103" style="color: black;">
+                                <input type="checkbox">2. 葱,白菜
+                    </span>
+            </div>
+        */
+        function renderOneItem(secondClassName, content, json) { // secondClassName，例如:"蔬菜类"，传进来方便后续使用
+            return `<span class='item' secondClassName='${secondClassName}' json='${json}' >
+                        <input type='checkbox'/>${content}
+                    </span>`;
+        }
+
+        // 渲染以及分类的二级分类列表
+        function renderSecondClassList(secondClassList) {
+            var totalCnt = secondClassList.map(item => item.list.length).reduce((a, b) => a + b);
+            // 过长的拆两列展示，不然太高需要向下翻页
+            var divClassName = totalCnt > 30 ? "long" : "normal";
+            return secondClassList.map(item => "<div class='" + divClassName + "'>" + "<h4>" + item.name + ":</h4>" +
+                (item.list.map((ele, i) => {
+                        // 对于"搭配做"而言，ele是个列表，"单独做"下的是单个元素，为方便，这里统一处理成列表
+                        ele = ele instanceof Array ? ele : [ele];
+                        var secondClassName = item.name; // 海白虾
+                        var content = (i + 1) + ". " + ele.join(","); // 2. 葱,白菜
+                        return renderOneItem(secondClassName, content, JSON.stringify(ele));
+                    }
+                ).join("<br>"))
+                + "</div>"
+            ).join("");
+        }
+
+        // 渲染一个分组
+        function renderFirstClass(idx, oneGroup) { // oneGroup类型为Subtype
+            var div = document.createElement("div");
+            div.className = "category";
+            div.innerHTML = `
+            <h2> ${idx}. ${oneGroup.name}:</h2>
+            ${renderSecondClassList(oneGroup.list)}
+        `;
+            div.id = oneGroup.name;
+            mainEle.appendChild(div);
+        }
+
+        // 渲染所有分组，添加到mainEle中
+        foodGroups.forEach((oneGroup, idx) => renderFirstClass(idx + 1, oneGroup))
+
+        // 所有菜品项
+        var allItems = Array.from(document.querySelectorAll("span.item"));
+        allItems.forEach((ele, idx) => {
+            ele.setAttribute("uid", idx); // 按顺序编号，后面染色用到
+            ele.style.color = "black"; // 初始化为黑色
+        });
+
+        // 只有这几类会做成菜，需要染色处理
+        var needColoringItems = allItems.filter(item => ["单独做", "搭配做-汤类", "搭配做-非汤类"].includes(item.parentNode.parentNode.id));
+
+        // 染色处理：选中的=>橙色、与已选集合有关联的=>红色、与已选集合有无关联的=>黑色
+        //
+        // 设每个菜品项ai，都对应0-n个关联项目Bi = f(ai)
+        // 设有k个被选中的菜品，构成集合A = {a0, a1, ..., ak}
+        // 那么，需要染色的菜品集合C = B0 ∪ B1 ∪ ... Bk = f(A)
+        // 设已染色(指橙色和红色)的集合为S，那么需要去改变染色状态的集合D = (S - C) ∪ (C - S) = (S - f(A)) ∪ (f(A) - S)
+        //
+        // 上面，A通过checked状态得到，S在染色之后可设置，关键是需要算出关联信息f，以及提供C和D的具体计算机制。
+        // 之后就只需要根据定义去维护这些集合即可，比如每次算出D之后，按照D的元素去进行对应染色操作。
+        //
+        // 考虑到菜品数组总元素的个数固定，可通过位运算实现高效的集合计算。
+        //
+        // 具体来说，分为两部分：
+        // 一、三个数组
+        // 1. 关联信息数组：relatedItemsBitsArr，元素i表示 allItems[i] 对应的关联菜品信息 => 对应前面的【函数f】
+        //    具体来说：如果relatedItemsBitsArr[i]从左开始数第j位为1，表示allItems[i]如果被选中，那么需要对allItems[j]进行染色。
+        // 2. 已选择数组：selectedBits，如果第i位（i=0..n）为1，则表示allItems[i]被选中了 => 对应前面的【集合A】
+        // 3. 已染色数组：coloredBits，如果第i位（i=0..n）为1，则表示allItems[i]被染色了 => 对应前面的【集合S】
+        //
+        // 二、染色逻辑
+        // 1. 找出selectedBits的1，假设位置为a0, a1, a2, ..., ak
+        // 2. 通过或操作求并集: unionBits = relatedItemsBitsArr[a0] | relatedItemsBitsArr[a1] |  ... |  relatedItemsBitsArr[ak] => 对应前面的【集合C】
+        // 3. 那么，需要改变染色状态的为：needToggleColorBits = coloredBits ^ unionBits => 对应前面的【集合D】
+        // 4. 取出needToggleColorBits的1，假设位置为b0, b1, ..., bm，进行如下判断：
+        //      如果 allItems[bk] 被选中了，则染为橙色，如果未被选中，如果红色则改黑色，黑色改红色。
+        // 5. 染色之后，设置coloredBits = unionBits 即可。
+        //
+        // 由于菜品总数超过了100，需要封装一个位运算的类，提供：
+        // 1. 位数组的位运算功能（or xor clear set）
+        // 2. 获取1位置的索引功能
+        // 具体参考 bits.js
+
+
+        // 一、三个数组的生成
+
+        // 1. 关联信息数组：relatedItemsBitsArr
+        var relatedItemsBitsArr = new Array(allItems.length).fill(0).map(() => new Bits(allItems.length));
+        // 这里有两个坑：
+        // (1) fill的话如果是引用类型，则都是一个。
+        // (2) fill(0)是为了map可以进行
+
+        // relatedItemsBitsArr的生成：
+        // 第一次遍历needColoringItems：构建倒排索引invertedIndexes，key: 菜品名称，value: 菜品所包含的uid集合
+        // 第二次遍历needColoringItems：设遍历到了item=needColoringItems[i]，item对应的菜品成分列表为names
+        // （菜品成分列表：比如【4. 搭配做-汤类】里【豆腐】分类下有个【3. 牛肉,淀粉,干贝,汤】，那么成分为[豆腐(主材)、牛肉,淀粉,干贝]，
+        // 其中排除"汤"和调料(比如葱等)，这些不影响营养成分，不需要进行关联），那么查询逐个name在invertedIndexes的值，记为uids，
+        // 设置relatedItemsBitsArr[item.uid]的uids表示的所有位置为1即可。
+        //
+        // 以上，最坏时间复杂度为O(nk)，其中n为relatedItemsBitsArr长度，k为平均菜品成分列表长度，接近2。
+        // 如果不用倒排索引，那么需要两重循环i和j，去对每个needColoringItems[i]，去算是否和needColoringItems[j]有关联，最坏需要O(n*(k+n*k))=O(n^2*k)时间复杂度。
+
+        // 第一次遍历：倒排索引
+        invertedIndexes = {}
+
+        function addToInvertedIndexes(key, uid) {
+            if (!(key in invertedIndexes)) {
+                invertedIndexes[key] = new Set();
+            }
+            invertedIndexes[key].add(uid);
+        }
+
+        var uid2ToAddNames = {};
+        needColoringItems.forEach(item => {
+            var uid = parseInt(item.getAttribute("uid"));
+            // 搭配类的，需要把主材也要选上
+            var toAddNames = [];
+            if (["搭配做-汤类", "搭配做-非汤类"].includes(item.parentNode.parentNode.id)) {
+                var secondClassName = item.getAttribute("secondClassName");
+                toAddNames.push(secondClassName);
+            }
+            toAddNames = toAddNames.concat(JSON.parse(item.getAttribute("json"))
+                .filter(name => "煎汤".indexOf(name) === -1 && !condimentNames.has(name))); // 排除做法和调料
+
+            toAddNames.forEach(name => addToInvertedIndexes(name, uid));
+            uid2ToAddNames[uid] = toAddNames;
+        });
+
+        // 第二次遍历：设置关联信息
+        needColoringItems.forEach(item => {
+            var uid = parseInt(item.getAttribute("uid"));
+            var toAddNames = uid2ToAddNames[uid];
+            toAddNames.forEach(name => {
+                var relatedUIDs = invertedIndexes[name];
+                for (var relatedUID of relatedUIDs) {
+                    relatedItemsBitsArr[uid].set(relatedUID);
+                }
+            })
+        });
+
+        // 2. 已选择数组 从左开始数，第i位（i=0..n）为1，表示allItems[i]被选中了
+        var selectedBits = new Bits(allItems.length); // 一开始自然啥也没选中
+
+        // 3. 已染色数组：1表示被染色了（红色（关联但是未被选中） or 橙色(被选中)），0表示未被染色（黑色）
+        var coloredBits = new Bits(allItems.length);
+
+        // 处理点击事件，使用事件委托，性能更好
+
+        var clickFn = function (event) {
+            var span = null;
+            if (event.target.nodeName === "SPAN") {
+                // 点击span也操作checkbox
+                span = event.target;
+                span.children[0].checked = !span.children[0].checked;
+            } else if (event.target.nodeName === "INPUT") {
+                span = event.target.parentNode;
+            } else {
+                return;
+            }
+            var uid = parseInt(span.getAttribute("uid"));
+            if (span.children[0].checked) {
+                selectedBits.set(uid);
+            } else {
+                selectedBits.clear(uid);
+            }
+
+            // 更新染色和购物车
+            updateColorAndCart();
+        }
+        mainEleOnClickerEventListeners.push(clickFn);
+        mainEle.addEventListener("click", clickFn);
+
+        // 二、染色逻辑 （以及 购物车信息更新）
+        var updateColorAndCart = function () {
+            // 被选择的菜品下标列表
+            var onePosOfSelectedBits = selectedBits.getOnePosList();
+
+            // unionBits 对应当前选中的菜品所关联的所有span
+            var unionBits = onePosOfSelectedBits
+                .map(idx => relatedItemsBitsArr[idx]) // 拿到对应的关联信息
+                .reduce((a, b) => a.or(b), new Bits(allItems.length));
+
+            // 需要改变染色的位图
+            var needToggleColorBits = coloredBits.xor(unionBits);
+
+            // 设置已染色位图为本次待染色位图
+            coloredBits = unionBits;
+
+            // 需要改变染色的下标列表
+            var needToggleColorBitsOnePos = needToggleColorBits.getOnePosList();
+
+            // 改染色逻辑
+            needToggleColorBitsOnePos.forEach(idx => {
+                var item = allItems[idx];
+                if (onePosOfSelectedBits.includes(idx)) {
+                    item.style.color = "#FF9800";
+                    return;
+                }
+                item.style.color = item.style.color === "black" ? "red" : "black";
+                console.log(item);
+                console.log(item.style.color);
+            });
+
+            // 购物车处理
+            // 1. 拿到被选择的所有item
+            // 2. 生成已选清单和待买清单
+            // 区别是，已选清单是比如【5. 搭配做-非汤类: 海白虾-2. 葱,白菜】支持点击取消，待买清单是比如【1. 海白虾 2. 葱 3. 白菜】，用来实际购买的时候参考。
+
+            // 被选择的items
+            var chosenItems = onePosOfSelectedBits.map(idx => allItems[idx]);
+
+            // 被选择的食材名称
+            var chosenNames = new Set();
+            chosenItems
+                .forEach(item => {
+                    // 搭配类的，需要把主材也要选上
+                    if (["搭配做-汤类", "搭配做-非汤类"].includes(item.parentNode.parentNode.id)) {
+                        chosenNames.add(item.getAttribute("secondClassName"));
+                    }
+                    JSON.parse(item.getAttribute("json"))
+                        .filter(x => "煎汤".indexOf(x) === -1) // 排除做法（这里和染色处理不一样，不用过滤调料，因为调料需要加到购物车里）
+                        .forEach(x => chosenNames.add(x));
+                });
+
+
+            var toBuyEle = document.getElementById("toBuy");
+            var cartWrapperEle = document.getElementById("cartWrapper");
+            var toBuyNames = Array.from(chosenNames);
+            if (toBuyNames.length === 0) { // 没有需要买的，隐藏购物车
+                cartWrapperEle.style.display = "none";
+            } else {
+                cartWrapperEle.style.display = "block";
+                // "需要购买"信息中，每行做多展示len个，防止一行太长，或者太高，影响阅读
+                toBuyEle.innerHTML = "需要购买:<br>" + splitListInBatch(toBuyNames, 5).map((x, i) => {
+                    return x.map((xx, j) => {
+                        var idx = i * 5 + j + 1;
+                        return idx + ". " + xx; // 1. 西瓜 2. 菠萝 3. 桃子 ...
+                    }).join(" ");
+                }).join("<br>");
+            }
+
+            var cartEle = document.getElementById("cart");
+            var allUIDsInCart = new Set(Array.from(cartEle.children).map(li => li.uid));
+
+            // 需要加的 = 已选 - 已在购物车里的
+            // 需要删的 = 已在购物车里的 - 已选
+            var chosenItemsUIDs = new Set(chosenItems.map(item => item.getAttribute("uid")));
+            var toAddUIDsInCart = sub(chosenItemsUIDs, allUIDsInCart);
+            var toDelUIDsFromCart = sub(allUIDsInCart, chosenItemsUIDs);
+
+            // 移除
+            Array.from(cartEle.children).filter(li => toDelUIDsFromCart.has(li.uid)).forEach(li => cartEle.removeChild(li));
+
+            // 添加
+            chosenItems.forEach(one => {
+                var uid = one.getAttribute("uid");
+                if (!toAddUIDsInCart.has(uid)) {
+                    return;
+                }
+                var secondClassName = one.getAttribute("secondClassName");
+                var itemInCart = document.createElement("li");
+                itemInCart.uid = uid;
+                var parentName = one.parentNode.parentNode.children[0].innerText;
+                itemInCart.innerText = [parentName + " " + secondClassName, one.innerText].join("-"); // 例如："5. 搭配做-非汤类: 鸡蛋-3. 胡萝卜"
+                var spanEle = document.createElement("span");
+                spanEle.innerText = " [X]";
+                spanEle.style.color = "red";
+                spanEle.style.cursor = "pointer";
+                spanEle.onclick = function () {
+                    // 点击时反勾选对应的item
+                    one.children[0].checked = false;
+                    // 对selectedBits对应位置清零
+                    selectedBits.clear(parseInt(uid));
+                    // 再调用updateColorAndCart自然会删除掉自己（购物车里的spanEle元素）
+                    updateColorAndCart();
+                };
+                itemInCart.appendChild(spanEle);
+                cartEle.appendChild(itemInCart);
+            });
+
+            // 购物车的已选列表按类别排序，更加美观，不然很乱。
+            var chosenLiEleList = [];
+            for (var i = 0; i < cartEle.children.length; i++) {
+                chosenLiEleList.push(cartEle.children[i]);
+            }
+
+            chosenLiEleList.sort((a, b) => {
+                function parse(title) {
+                    // "3. 单独做: 蔬菜类-14. 芥菜" 处理为 "3. 单独做: 蔬菜类" 和 "14. 芥菜"，用来分别排序
+                    var matchRes = title.match(/^(\d+\. .+?: .+?)-(\d+)\. .+?$/);
+                    return [matchRes[1], parseInt(matchRes[2])];
+                }
+
+                var parsedA = parse(a.innerText);
+                var parsedB = parse(b.innerText);
+                if (parsedA[0] !== parsedB[0]) { // 大类不同则按大类排
+                    return parsedA[0] > parsedB[0] ? 1 : -1;
+                } else { // 大类相同按子类排
+                    return parsedA[1] > parsedB[1] ? 1 : -1;
+                }
+            });
+
+            // 上面的排序只是lis数组，还需要更新到ui上。先移除，再按lis添加即可。
+            Array.from(cartEle.children).forEach(li => cartEle.removeChild(li));
+            chosenLiEleList.forEach(li => cartEle.appendChild(li));
+        };
+    }
+
+    // 以下为彩蛋部分
+
+    // 实现：输入指定的字符序列开启播放 和 歌词展示+动画
+    // 期望输入序列
+    var expects = "yjsl";
+    var yjslEle = document.getElementById("yjsl");
+
+    // 生成Y J S L四个span，这样实际上改expects就能支持任何序列了
+    expects.split("").forEach((x, idx) => {
+        var span = document.createElement("span");
+        span.style.left = idx * 100 / expects.length + "%";
+        span.innerText = x.toUpperCase();
+        yjslEle.appendChild(span);
+    })
+
+    var yjslSpans = Array.from(yjslEle.children);
+
+    // 在此时刻之前应当可见
+    var yjslEleShouldBeVisibleBefore = null;
+
+    // 循环处理可见逻辑
+    (function yjslEleVisibilityControl() {
+        if (yjslEleShouldBeVisibleBefore != null) {
+            if (new Date().valueOf() < yjslEleShouldBeVisibleBefore) {
+                show([yjslEle]);
+            } else {
+                hide([yjslEle]);
+            }
+        } else {
+            hide([yjslEle]);
+        }
+        setTimeout(yjslEleVisibilityControl, 100);
+    })();
+
+    var stateMachine = new StateMachine(expects);
+    document.body.addEventListener("keydown", event => {
+        if (isVisibleByDisplay(editorEle)) {
+            return;
+        }
+
+        // 每次按键续期展示3s
+        yjslEleShouldBeVisibleBefore = new Date().valueOf() + 3000;
+
+        // 说明刚输入完，即将开始播放音乐以及清空typedValidKeys，这期间直接return防止后续数组越界
+        if (stateMachine.isInAccpetState()) {
+            return;
+        }
+
+        // 当前输入的按键
+        var key = event.key.toLowerCase();
+        stateMachine.input(key);
+        for (var i = 0; i < yjslSpans.length; i++) {
+            var ele = yjslSpans[i];
+            if (i < stateMachine.getValidInputed().length) { // 注意不是<=
+                ele.style.color = "red";
+            } else {
+                ele.style.color = "#e0e0e0";
+            }
+        }
+        if (stateMachine.isInAccpetState()) {
+            // 延迟播放，这样可以看到四个字母都染红的效果
+            setTimeout(
+                function () {
+                    playMusic();
+                    // 关闭YJSL展示
+                    yjslEleShouldBeVisibleBefore = null;
+                    // 清空已输入的按键。延迟清空是为了在屏幕上展示一小段时间四个都输入的情况
+                    stateMachine.reset();
+                }, 500);
+        }
+    });
+
+    // 歌词，直接下载的，然后根据实际情况进行时间微调。
+    // 1. 在LRC语法上增加对微调的支持，即[00:23.91+0.4]里的+0.4
+    // 2. 支持标记动画的起始和终止，方便歌曲和动画联动
+    var lrcRaw = `[offset:0]
+[00:00.00]《云烟成雨》
+[00:05.00]词：墨鱼丝
+[00:07.50]曲：少年佩
+[00:10.00]编曲、制作人：黎偌天
+[00:12.50]监制：李纤橙
+[00:15.00]翻唱：周圆圆
+[00:18.00]你的晚安是下意识的恻隐
+[00:23.91+0.4]
+[00:24.72]我留至夜深治疗失眠梦呓
+[00:29.61+0.4]
+[00:30.76]那封手写信留在行李箱底
+[00:35.47+0.3]
+[00:36.14]来不及赋予它旅途的意义
+[00:42.37+0.7]
+[00:43.51]若一切都已云烟成雨
+[00:48.56+0.4]
+[00:49.39]我能否变成淤泥
+[00:52.56]再一次沾染你
+[00:55.24+0.3]
+[00:56.19]若生命如过场电影
+[01:00.70+0.1]
+[01:01.21]Oh 让我再一次甜梦里惊醒
+[01:09.16+0.9]
+[01:13.52]我多想再见你[startRain]
+[01:15.61]哪怕匆匆一眼就别离
+[01:18.39+0.3]
+[01:19.72]路灯下昏黄的剪影
+[01:22.66]越走越漫长的林径
+[01:24.96+0.4]
+[01:25.95]我多想再见你
+[01:28.14]至少玩笑话还能说起
+[01:30.98+0.6]
+[01:32.11]街巷初次落叶的秋分
+[01:35.29]渐行渐远去的我们
+[01:39.92+0.3][endRain]`;
+
+    var lrcHelper = createLRCHelper(lrcRaw);
+    var animationController = createAnimationController(lrcHelper);
+    var endingDelayInSec = 5; // 音乐停止之后，等待多久停止下雨
+    function playMusic() {
+        // 关闭主界面
+        var cartWrapperEle = document.getElementById("cartWrapper");
+        hide([mainEle, cartWrapperEle, yjslEle, editorBtnEle]);
+
+        // 展示歌词界面
+        show([canvasEle]);
+
+        // 播放结束且动画结束之后执行（音乐结束比动画结束早）
+        var endHook = function () {
+            // 打开主界面，关闭歌词界面
+            hide([canvasEle]);
+            show([mainEle, cartWrapperEle, editorBtnEle]); // yjslEle 无需手动打开
+        }
+
+        // 延迟1s开始播放音乐
+        var bgMusicEle = document.getElementById("bgMusic");
+        bgMusicEle.volume = 0.5;
+        setTimeout(function () {
+            animationController.start(bgMusicEle, endingDelayInSec, endHook);
+        }, 1000);
+    }
+
+</script>
+</html>

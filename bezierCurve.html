@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Title</title>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+</body>
+<script>
+    var WIDTH = window.innerWidth * window.devicePixelRatio;
+    var HEIGHT = window.innerHeight * window.devicePixelRatio;
+    var canvas = document.getElementById("canvas");
+    canvas.style.zoom = 1 / window.devicePixelRatio;
+
+    var ctx = canvas.getContext("2d");
+
+    ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+    (window.onresize = function () {
+        // 长宽更新
+        WIDTH = canvas.width = window.innerWidth * window.devicePixelRatio;
+        HEIGHT = canvas.height = window.innerHeight * window.devicePixelRatio;
+
+        // 歌词字体配置
+
+        ctx.fillText("", 0, 0);// 用来载入防止抖动的，不然会先展示为默认字体，然后闪现为载入的字体
+    })();
+    ctx.font = "bold 20px Arial";
+    ctx.lineWidth = 3;
+    var drop = {
+        x: WIDTH / 2,
+        y: HEIGHT / 10,
+        w: WIDTH / 5,
+        h: HEIGHT / 2,
+    }
+    var x = drop.x;
+    var y = drop.y;
+    var w = drop.w;
+    var h = drop.h;
+    var P0 = [x, y, "P0", -20, 0];
+    var P1 = [x - w / 2, y + h, "P1", -20, 20];
+    var P2 = [x + w / 2, y + h, "P2", 20, 20];
+    var P3 = [x, y, "P3", 20, 0];
+    var P01;
+    var P12;
+    var P23;
+    var P01_12;
+    var P12_23;
+    var B;
+    var Bs;
+
+    var t = 0;
+
+    function calPoint(Pa, Pb, t, name) {
+        var x = Pa[0] + (Pb[0] - Pa[0]) * t;
+        var y = Pa[1] + (Pb[1] - Pa[1]) * t;
+        return [x, y, name];
+    }
+
+    function calBCore(p0, p1, p2, p3, t, getter) {
+        return Math.pow(1 - t, 3) * getter(p0) + 3*t*Math.pow(1 - t, 2) * getter(p1) + 3 * t * t * (1 - t) * getter(p2) + t * t * t * getter(p3);
+    }
+
+    function calB(P0, P1, P2, P3, t) {
+        // \vec B(t) = （1-t)^3\vec P_0+3t(1-t)^2\vec P1+3t^2(1-t)\vec P_2+t^3\vec P_3, t∈[0,1]
+        var Bx = calBCore(P0, P1, P2, P3, t, (p) => p[0])
+        var By = calBCore(P0, P1, P2, P3, t, (p) => p[1])
+        return [Bx, By]
+    }
+
+    function range(a, b, step) {
+        var n = Math.floor((b - a) / step);
+        var vec = new Array(n);
+        for (var i = 0; i < n; i++) {
+            vec[i] = a + step * i;
+        }
+        return vec;
+    }
+
+    function update() {
+        t += 0.01;
+        if (t > 1) {
+            t = 0;
+        }
+        P01 = calPoint(P0, P1, t, "P0'");
+        P01.push(...[-30, 0])
+        P12 = calPoint(P1, P2, t, "P1'");
+        P12.push(...[0, 30])
+        P23 = calPoint(P2, P3, t, "P2'");
+        P23.push(...[30, 0])
+
+        P01_12 = calPoint(P01, P12, t, "P0''");
+        P12_23 = calPoint(P12, P23, t, "P1''");
+
+        B = calPoint(P01_12, P12_23, t, "B");
+        var tvec = range(0, t, 0.001)
+        Bs = tvec.map(t => calB(P0, P1, P2, P3, t));
+    }
+
+    function drawLine(A, B, style) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(A[0], A[1]);
+        ctx.lineTo(B[0], B[1]);
+        ctx.strokeStyle = style;
+        // ctx.lineWidth = "red";
+        ctx.stroke();
+        ctx.restore();
+        drawEmptyPoint(A);
+        drawEmptyPoint(B);
+    }
+
+    function drawEmptyPoint(P) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.fillStyle = "red";
+        ctx.strokeStyle = "black";
+        ctx.ellipse(P[0], P[1], 5, 5, 0, 0, 2 * Math.PI);
+        ctx.stroke();
+        ctx.restore();
+        if (P[2] != null) {
+            drawText(P[2], P);
+        }
+    }
+
+    function drawArc(points) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.fillStyle = "red";
+        ctx.strokeStyle = "red";
+        ctx.moveTo(points[0], points[1]);
+        for (i = 1; i < points.length; i++) {
+            var p = points[i];
+            ctx.lineTo(p[0], p[1]);
+        }
+        ctx.stroke();
+
+        ctx.restore();
+    }
+
+    function drawPoint(P) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.fillStyle = "red";
+        ctx.ellipse(P[0], P[1], 5, 5, 0, 0, 2 * Math.PI);
+        ctx.fill();
+        ctx.restore();
+        drawText(P[2], P);
+    }
+
+    function drawText(content, P) {
+        var offsetX = P[3] || 0;
+        var offsetY = P[4] || 0;
+        ctx.save();
+        ctx.beginPath();
+        ctx.textBaseline = "ideographic"; // 方便实现中文的垂直居中
+        ctx.textAlign = "center";
+        ctx.fillText(content, P[0] + offsetX, P[1] + offsetY);
+        ctx.restore();
+    }
+
+    function render() {
+        // 清空画布
+        ctx.clearRect(0, 0, WIDTH, HEIGHT);
+        // 雨滴
+        ctx.save();
+        ctx.beginPath();
+        ctx.lineWidth = 0;
+        ctx.fillStyle = "black";
+
+        ctx.moveTo(x, y);
+        ctx.bezierCurveTo(x - w / 2, y + h, x + w / 2, y + h, x, y);
+        ctx.stroke();
+        ctx.restore();
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.fillStyle = "red";
+        ctx.ellipse(B[0], B[1], 5, 5, 0, 0, 2 * Math.PI);
+        ctx.fill();
+        ctx.restore();
+
+
+        drawLine(P0, P1, "blue");
+        drawLine(P1, P2, "blue");
+        drawLine(P2, P3, "blue");
+        drawLine(P01, P12, "#ff9800");
+        drawLine(P12, P23, "#ff9800");
+        drawLine(P01_12, P12_23, "green");
+        drawPoint(B);
+        drawArc(Bs);
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.textBaseline = "ideographic"; // 方便实现中文的垂直居中
+        ctx.textAlign = "center";
+        ctx.fillText("t=" + Math.floor(t * 100) / 100, WIDTH / 2, HEIGHT * 0.7);
+        ctx.restore();
+
+    }
+
+    var loopStatus = -1;
+
+    function loop() {
+        update();
+        render();
+        setTimeout(function () {
+            if (loopStatus === -1) {
+                return;
+            }
+            loop();
+        }, 50);
+    }
+
+    // loop();
+
+    canvas.onclick = function () {
+        loopStatus = -loopStatus;
+        if (loopStatus === 1) {
+            loop();
+        }
+    }
+
+</script>
+</html>
