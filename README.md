@@ -4,8 +4,6 @@
 
 在线地址：https://ztinpn.sinaapp.com/maicai/index.html
 
-工具地址：https://ztinpn.sinaapp.com/maicai/index.html
-
 思维导图：https://img1.imgtp.com/2023/08/23/MRvYiLeM.png
 
 参考文献:
